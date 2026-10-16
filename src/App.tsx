@@ -238,6 +238,9 @@ export default function App() {
         return;
       }
 
+      // limpa o campo de digitação assim que a mensagem é aceita para envio
+      setInput("");
+
       const sessionId = activeId;
       const userMessage: ChatMessage = {
         id: uid(),
