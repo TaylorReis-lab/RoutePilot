@@ -114,6 +114,10 @@ const faq = [
     a: "A REST de memória passa por requireManagementAuth: use um Access Token do OminRoute (oma_live_…) com escopo read/write/admin, ou uma API Key habilitada com manage/admin. Uma chave comum de inferência recebe 401/403 nessas rotas.",
   },
   {
+    q: "Onde filtro o tipo do modelo (chat, áudio, imagem, embedding…)?",
+    a: "Em Conexão → Modelo: o RoutePilot carrega o catálogo unificado do OminRoute (GET /api/models/catalog, com fallback para GET /v1/models) e oferece pesquisa por modelo/provedor/capacidade, filtro de Provedor e filtro de Tipo — Chat, Audio (Fala/Transcrição), Imagem, Embedding, Rerank, Moderação, Vídeo e Música — com contexto, saída máxima e flags (Gratuito/Custom) em tabela paginada. Um clique na linha seleciona o modelo.",
+  },
+  {
     q: "Quais servidores têm memória como a do OminRoute?",
     a: "Nenhum outro. Ollama, LM Studio, llama.cpp, vLLM e OpenRouter são stateless: você reenvia o histórico a cada chamada e nada é guardado no servidor. O LocalAI oferece \"stores\" de vetores (get/set/find), que dá para usar como memória feita à mão, sem injeção automática. O RoutePilot detecta isso e, nesses casos, mantém apenas o histórico local do navegador mais o system prompt.",
   },

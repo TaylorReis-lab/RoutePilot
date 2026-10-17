@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -8,7 +8,6 @@ import {
   EyeOff,
   Image as ImageIcon,
   KeyRound,
-  LayoutGrid,
   Loader2,
   Lock,
   Plug,
@@ -19,6 +18,8 @@ import {
 } from "lucide-react";
 import type { ConnectionConfig, ConnectionStatus } from "../types";
 import { buildBaseUrl, buildManagementBaseUrl, resolveVisionMode } from "../lib/api";
+import { ModelCatalog } from "./ModelCatalog";
+import { fetchModelCatalog, idsToCatalog, typeLabel, type CatalogModel } from "../lib/catalogApi";
 import {
   MEMORY_SUPPORT_LABEL,
   SERVER_PROFILES,
@@ -27,7 +28,6 @@ import {
   type ServerProfile,
 } from "../lib/serverProfiles";
 import { Field, Card, inputClass } from "./Field";
-import { ModelCatalog } from "./ModelCatalog";
 import { cn } from "../utils/cn";
 import type { ReactNode } from "react";
 
@@ -76,7 +76,50 @@ export function ConnectionView({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showManagementKey, setShowManagementKey] = useState(false);
-  const [showCatalog, setShowCatalog] = useState(false);
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogVersion, setCatalogVersion] = useState("");
+  const [catalogNonce, setCatalogNonce] = useState(0);
+
+  // carga o catálogo (agrupado por provedor/tipo) sempre que a conexão muda
+  useEffect(() => {
+    let alive = true;
+    setCatalogLoading(true);
+    const timer = window.setTimeout(() => {
+      fetchModelCatalog(config)
+        .then((result) => {
+          if (!alive) return;
+          setCatalogModels(result.models);
+          setCatalogVersion(result.version ?? "");
+          setCatalogError(null);
+        })
+        .catch((err: Error) => {
+          if (!alive) return;
+          setCatalogError(err.message);
+          setCatalogModels(models.length ? idsToCatalog(models) : []);
+        })
+        .finally(() => {
+          if (alive) setCatalogLoading(false);
+        });
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    catalogNonce,
+    config.host,
+    config.port,
+    config.basePath,
+    config.apiKey,
+    config.managementKey,
+    config.managementPort,
+    config.managementPath,
+    config.useProxy,
+    config.proxyUrl,
+  ]);
 
   const set = <K extends keyof ConnectionConfig>(key: K, value: ConnectionConfig[K]) =>
     onConfigChange({ ...config, [key]: value });
@@ -433,53 +476,9 @@ export function ConnectionView({
         <Card
           title="Modelo"
           icon={<Cpu className="h-4 w-4" />}
-          description="Lista carregada do servidor, catálogo completo ou digitado à mão."
+          description="Busque no catálogo por provedor e tipo (chat, áudio, imagem, embedding…) ou digite o identificador."
           className="reveal rise-4"
         >
-          <button
-            type="button"
-            onClick={() => setShowCatalog(true)}
-            disabled={!config.managementKey.trim()}
-            title={
-              config.managementKey.trim()
-                ? "Ver todos os modelos, filtrados por provedor e tipo"
-                : "Informe o token de gerenciamento para abrir o catálogo"
-            }
-            className="flex w-full items-center justify-between gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.07] px-3.5 py-3 text-left transition hover:border-violet-400/45 hover:bg-violet-500/[0.12] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-violet-500/[0.07]"
-          >
-            <span className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-400/30 bg-violet-500/10 text-violet-200">
-                <LayoutGrid className="h-4 w-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="block text-[13px] font-semibold text-slate-100">
-                  Abrir catálogo de modelos
-                </span>
-                <span className="block text-[11px] text-slate-400">
-                  Filtre por provedor e tipo (chat, imagem, áudio, embedding…) com capacidades e contexto
-                </span>
-              </span>
-            </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-violet-300" />
-          </button>
-
-          {models.length > 0 && (
-            <Field label="Modelos disponíveis" hint={`${models.length} encontrado(s)`}>
-              <select
-                className={cn(inputClass, "appearance-none")}
-                value={config.model}
-                onChange={(e) => set("model", e.target.value)}
-              >
-                <option value="">Selecione…</option>
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-
           <Field label="Identificador do modelo" required>
             <input
               className={cn(inputClass, "font-mono")}
@@ -490,17 +489,38 @@ export function ConnectionView({
             />
           </Field>
 
-          {models.length === 0 && (
-            <p className="text-xs leading-relaxed text-slate-500">
-              Sem lista automática (o servidor pode não expor <code>/models</code> ou exigir
-              autenticação). Digite o identificador — exemplos deste servidor:{" "}
-              {detected.modelExamples.map((m) => (
-                <code key={m} className="mr-1 text-slate-300">
-                  {m}
-                </code>
-              ))}
-            </p>
-          )}
+          <ModelCatalog
+            models={catalogModels}
+            selectedId={config.model}
+            onSelect={(id) => set("model", id)}
+            loading={catalogLoading}
+            error={catalogError}
+            onRefresh={() => setCatalogNonce((n) => n + 1)}
+            version={catalogVersion}
+          />
+
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            Clique em uma linha do catálogo para selecionar. O filtro <strong className="text-slate-400">Tipo</strong> deixa
+            você escolher o que o chat faz (Chat, Audio, Imagem, Embedding, Rerank, Vídeo, Música…). Modelos com
+            capacidade <strong className="text-slate-400">Visão</strong> aceitam as imagens que você anexa. Exemplos deste
+            servidor: {detected.modelExamples.map((m) => (
+              <code key={m} className="mr-1 text-slate-300">
+                {m}
+              </code>
+            ))}
+          </p>
+
+          {(() => {
+            const selectedModel = catalogModels.find((m) => m.id === config.model);
+            if (!selectedModel || selectedModel.type === "chat") return null;
+            return (
+              <p className="rounded-lg border border-ember-400/25 bg-ember-400/[0.07] px-3 py-2 text-[11.5px] leading-relaxed text-ember-200">
+                O modelo selecionado é do tipo <strong>{typeLabel(selectedModel.type, selectedModel.subtype)}</strong>.
+                As mensagens do chat usam <code className="text-ember-100">/v1/chat/completions</code> — para esse fluxo,
+                prefira um modelo <strong>Chat</strong> (filtre por Tipo no catálogo).
+              </p>
+            );
+          })()}
         </Card>
 
         <Card title="Parâmetros e anexos" icon={<Sliders className="h-4 w-4" />}>
@@ -697,17 +717,6 @@ export function ConnectionView({
         </Card>
       </div>
       {footer}
-
-      {showCatalog && (
-        <ModelCatalog
-          config={config}
-          onClose={() => setShowCatalog(false)}
-          onSelectModel={(modelId) => {
-            set("model", modelId);
-            setShowCatalog(false);
-          }}
-        />
-      )}
     </div>
   );
 }

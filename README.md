@@ -32,7 +32,7 @@ Com o RoutePilot você conversa com **todos os modelos que o seu OminRoute rotei
 | Aba | O que você encontra |
 | --- | --- |
 | 💬 **Chat** | Conversa em tempo real com streaming (SSE) sem *flicker*, Markdown completo (blocos de código com cabeçalho *sticky* e botão de copiar fixo, tabelas, listas), envio de arquivos e imagens, exibição de raciocínio de modelos (*thinking*), contagem de tokens, regenerar resposta, botão **Aprender** em cada resposta e histórico com múltiplas conversas. |
-| 🔌 **Conexão** | Presets inteligentes de servidores (OminRoute, Ollama, LM Studio, llama.cpp, vLLM, OpenRouter), campos obrigatórios sinalizados com `*` em vermelho, URL, porta e rota separadas para chat (`/v1`) e para REST de gestão (`/api`), **API Key** e **Token de Gerenciamento** com **criptografia AES-256**, **catálogo completo de modelos filtrável por provedor e por tipo**, seletor de modo de visão (`image_url`), lista automática de modelos, temperatura, max tokens, system prompt, headers extras e proxy para CORS. |
+| 🔌 **Conexão** | Presets inteligentes de servidores (OminRoute, Ollama, LM Studio, llama.cpp, vLLM, OpenRouter), campos obrigatórios sinalizados com `*` em vermelho, URL, porta e rota separadas para chat (`/v1`) e para REST de gestão (`/api`), **API Key** e **Token de Gerenciamento** com **criptografia AES-256**, seletor de modo de visão (`image_url`), **catálogo de modelos com pesquisa, filtros de Provedor e Tipo (chat/áudio/imagem/embedding/rerank/vídeo/música) e seleção por clique**, temperatura, max tokens, system prompt, headers extras e proxy para CORS. |
 | 🧠 **Memória** | Painel completo integrado à REST API de memória do OminRoute: **Memórias** (CRUD completo, busca por texto, filtro por tipo e `sessionId`, paginação e health check), **Aprendizado** (ativação de memória e extração automática no servidor, orçamento de tokens, retenção, estratégia e fonte de embeddings) e **Motor & Busca** (diagnóstico de FTS5/vetores/rerank, simulador *retrieve-preview*, reindexação, compactação de memórias antigas e configuração completa do **Qdrant**). |
 | ℹ️ **Sobre** | Perfil do desenvolvedor Taylor Reis com links de GitHub e LinkedIn, contribuidores, lista detalhada de todos os tipos de arquivos aceitos, tabela comparativa de suporte a memória e visão entre servidores (OminRoute, Ollama, LM Studio, llama.cpp, vLLM, LocalAI e OpenRouter) com exemplos `curl`, roadmap de integrações futuras com sistemas SQL, anatomia da requisição, atalhos e FAQ. |
 
@@ -42,8 +42,7 @@ Com o RoutePilot você conversa com **todos os modelos que o seu OminRoute rotei
 
 - ✅ **Streaming em tempo real** (SSE) — resposta renderizada token por token com rolagem estabilizada (sem tremer a tela) e botão flutuante para voltar ao fim da conversa
 - ✅ **Presets de servidores com detecção automática** — um clique configura **OminRoute** (`localhost:20128/v1` + REST `/api`), Ollama, LM Studio, llama.cpp, vLLM e OpenRouter, exibindo o que cada servidor suporta
-- ✅ **Listagem automática de modelos** via `GET /models` — ou digite manualmente (ex.: `"auto"` no OminRoute escolhe o melhor modelo sozinho)
-- ✅ **Catálogo de modelos completo** (`GET /api/models/catalog`) — navegue por todos os modelos de todos os provedores conectados ao seu OminRoute, com busca por nome/provedor/capacidade e **filtro por Provedor e por Tipo** (`Chat`, `Imagem`, `Áudio`, `Embedding`, `Vídeo`, `Rerank`…), mostrando capacidades, contexto, limite de saída e flags (`custom`/`free`) — selecione um modelo direto na tabela para preencher o campo da aba Conexão
+- ✅ **Catálogo unificado de modelos** — pesquisa por modelo, provedor ou capacidade, filtros de **Provedor** e **Tipo** (Chat, Audio, Imagem, Embedding, Rerank, Moderação, Vídeo, Música), contexto, saída máxima e flags, em tabela paginada; um clique na linha seleciona o modelo (origem: `GET /api/models/catalog` com fallback para `GET /v1/models`)
 - ✅ **Sistema de Memória e Aprendizado (OminRoute REST API)** — crie, busque, filtre, edite e exclua memórias (`factual`, `episodic`, `procedural`, `semantic`), ou clique em **Aprender** diretamente em qualquer resposta do chat
 - ✅ **Motor de Memória, Playground & Qdrant** — simule buscas sem alterar dados (`POST /api/memory/retrieve-preview`), monitore FTS5 + `sqlite-vec` + Qdrant, dispare reindexação (`POST /api/memory/reindex`), compacte memórias antigas (`POST /api/memory/summarize`) e gerencie o Qdrant
 - ✅ **Upload de arquivos e imagens no chat** — anexe até 5 arquivos por mensagem pelo botão de clipe (`📎`) ou arrastando e soltando (*drag & drop*): códigos/textos/dados entram formatados no prompt e imagens (`png`, `jpg`, `webp`, `gif`, `bmp`, `tiff`) são enviadas como blocos multimodais `image_url`
@@ -100,34 +99,6 @@ npm run build
 3. Clique em **Testar conexão** — a lista de modelos é carregada automaticamente
 4. *(Opcional — para usar a aba Memória)* No card **REST de gerenciamento · memória**, confirme a rota `/api`, a porta (`20128` ou deixe em branco para usar a mesma do chat) e informe o **Token de gerenciamento** (`oma_live_…` ou chave com escopo `manage`/`admin`)
 5. Volte para a aba **Chat** para conversar, anexar arquivos ou clicar em **Aprender** nas respostas 🎉
-
----
-
-## 🗂️ Catálogo de modelos (filtrar por provedor e por tipo)
-
-Inspirado na página **Model catalog** do próprio painel do OminRoute, o RoutePilot traz o catálogo completo direto na aba **Conexão**, no card **Modelo** → botão **Abrir catálogo de modelos**.
-
-O catálogo consome `GET /api/models/catalog` (autenticado com o **Token de gerenciamento**, o mesmo usado pela Memória) e mostra, para **todos os provedores conectados ao seu OminRoute**, uma tabela igual à do dashboard oficial:
-
-| Coluna | Conteúdo |
-| --- | --- |
-| **Provedor** | Nome amigável e o id interno do provedor (ex.: `Deepgram` / `deepgram`) |
-| **Modelo** | Nome e identificador completo (`provider/model`, ex.: `deepgram/nova-3`) |
-| **Tipo** | `Chat`, `Imagem`, `Áudio`, `Embedding`, `Vídeo`, `Música`, `Rerank`, com subtipo quando houver (ex.: *Speech* / *Transcription*) |
-| **Capabilities** | Badges derivados de `capabilities` + modalidades de entrada/saída (ex.: *Reasoning*, *Tool calling*, *Vision*) |
-| **Context** | Tamanho da janela de contexto (`context_length`), quando reportado |
-| **Saída** | Limite de tokens de saída (`max_output_tokens`), quando reportado |
-| **Flags** | `custom` (modelo adicionado manualmente) e `free` (camada gratuita) |
-
-**Filtros disponíveis** (iguais aos do painel oficial do OminRoute):
-
-- 🔍 **Busca livre** — por nome do modelo, nome do provedor ou qualquer capacidade (ex.: digitar `vision` lista só modelos com suporte a imagem)
-- 🏷️ **Provedor** — select com todos os provedores presentes no catálogo (`Todos os provedores` por padrão)
-- 🧩 **Tipo** — select com todos os tipos encontrados (ex.: selecionar **Audio** mostra só modelos de voz/transcrição, como no exemplo de `deepgram/aura-asteria-en`, `deepgram/nova-3`, `deepgram/whisper-large`…)
-
-A tabela é paginada (12 modelos por página, com contagem "Mostrando X–Y de Z" e navegação Anterior/Próxima) e cada linha tem um botão **Usar** que preenche automaticamente o campo **Identificador do modelo** da aba Conexão — sem precisar copiar e colar o id manualmente.
-
-> ℹ️ O catálogo depende da REST de gerenciamento do OmniRoute (mesma exigência da aba Memória): configure a **Rota REST**, a **Porta REST** e o **Token de gerenciamento** no card *REST de gerenciamento · memória* antes de abrir o catálogo.
 
 ---
 
@@ -219,7 +190,8 @@ Qualquer servidor **compatível com OpenAI** funciona para o chat:
 
 | Endpoint | Descrição |
 | --- | --- |
-| `GET {base}/models` | Lista de modelos disponíveis (usada no botão *Testar conexão* — opcional) |
+| `GET {rest}/models/catalog` | Catálogo completo agrupado por provedor, com `type`, `subtype`, `capabilities`, `context_length`, `max_output_tokens` e flags (usa autenticação de gerenciamento quando disponível) |
+| `GET {base}/models` | Lista OpenAI de modelos (fallback do catálogo e botão *Testar conexão*) |
 | `POST {base}/chat/completions` | Chat completion no formato OpenAI (`messages`, `temperature`, `max_tokens`, `stream`) |
 
 Headers enviados automaticamente: `Content-Type`, `Accept`, `Authorization: Bearer <key>` (quando informada), `HTTP-Referer`, `X-Title` e `X-Session-Id`. Headers extras podem ser adicionados em *Avançado → Headers extras*.
@@ -257,19 +229,19 @@ Headers enviados automaticamente: `Content-Type`, `Accept`, `Authorization: Bear
     │   ├── ChatView.tsx        # Tela do chat (lista + mensagens + composer + scroll estável)
     │   ├── ConnectionView.tsx  # Tela de conexão (presets, chat /v1, REST /api, visão e chaves)
     │   ├── MemoryView.tsx      # Estúdio de memória (CRUD, aprendizado, motor, preview e Qdrant)
-    │   ├── ModelCatalog.tsx    # Catálogo de modelos com filtro por provedor e por tipo
     │   ├── AboutView.tsx       # Sobre, equipe, tipos de arquivos, comparativo de servidores e roadmap SQL
     │   ├── ConversationList.tsx# Histórico de conversas na lateral/drawer
     │   ├── MessageItem.tsx     # Balão de mensagem (anexos, código, copiar, regenerar e aprender)
     │   ├── Markdown.tsx        # Renderização de markdown e blocos de código com topo fixo
     │   ├── Composer.tsx        # Caixa de mensagem com upload de arquivos, drag-and-drop e guia de tipos
+    │   ├── ModelCatalog.tsx    # Tabela de modelos com pesquisa, filtros (provedor/tipo) e paginação
     │   ├── Field.tsx           # Campos e cards de formulário com indicador * obrigatório em vermelho
     │   ├── SiteFooter.tsx      # Rodapé profissional (barra slim no chat e rodapé completo nas abas)
     │   └── SocialIcons.tsx     # Ícones vetoriais do GitHub e LinkedIn
     └── lib/
         ├── api.ts              # Cliente OpenAI-compatível (SSE, multimodal image_url e rotas REST)
+        ├── catalogApi.ts       # Catálogo unificado de modelos (/api/models/catalog + fallback /v1/models)
         ├── memoryApi.ts        # Cliente REST autenticado para /api/memory e /api/settings/*
-        ├── catalogApi.ts       # Cliente REST para /api/models/catalog (filtros por provedor/tipo)
         ├── fileTypes.ts        # Catálogo canônico de extensões aceitas e limites de anexo
         ├── attachments.ts      # Leitura de arquivos no navegador (texto cercado e imagem base64)
         ├── serverProfiles.ts   # Perfis e exemplos de OminRoute, Ollama, LM Studio, llama.cpp, vLLM e OpenRouter

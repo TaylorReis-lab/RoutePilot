@@ -1,331 +1,321 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle,
-  CheckCircle2,
+  AlertTriangle,
+  Check,
   ChevronLeft,
   ChevronRight,
   Loader2,
   RefreshCw,
   Search,
   Sparkles,
-  X,
 } from "lucide-react";
-import type { CatalogModel, ConnectionConfig, ModelCatalogResult } from "../types";
-import { capabilityLabels, fetchModelCatalog, typeLabel, uniqueProviders, uniqueTypes } from "../lib/catalogApi";
-import { inputClass } from "./Field";
+import type { CatalogModel } from "../lib/catalogApi";
+import { capabilityList, formatTokens, typeLabel } from "../lib/catalogApi";
 import { cn } from "../utils/cn";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 8;
 
-function formatCount(value?: number): string {
-  return typeof value === "number" ? new Intl.NumberFormat("pt-BR").format(value) : "—";
+function typeTone(type: string): string {
+  switch (type) {
+    case "chat":
+      return "border-violet-400/30 bg-violet-500/10 text-violet-200";
+    case "audio":
+      return "border-sky-400/30 bg-sky-500/10 text-sky-200";
+    case "image":
+      return "border-rose-400/30 bg-rose-500/10 text-rose-200";
+    case "embedding":
+      return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
+    case "rerank":
+      return "border-amber-400/30 bg-amber-500/10 text-amber-200";
+    case "moderation":
+      return "border-orange-400/30 bg-orange-500/10 text-orange-200";
+    case "video":
+      return "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-200";
+    case "music":
+      return "border-pink-400/30 bg-pink-500/10 text-pink-200";
+    default:
+      return "border-white/15 bg-white/[0.04] text-slate-300";
+  }
+}
+
+function matchesSearch(model: CatalogModel, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    model.id,
+    model.name ?? "",
+    model.provider,
+    model.providerName,
+    typeLabel(model.type, model.subtype),
+    ...capabilityList(model),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
 }
 
 export function ModelCatalog({
-  config,
-  onClose,
-  onSelectModel,
+  models,
+  selectedId,
+  onSelect,
+  loading,
+  error,
+  onRefresh,
+  version,
 }: {
-  config: ConnectionConfig;
-  onClose: () => void;
-  onSelectModel: (modelId: string) => void;
+  models: CatalogModel[];
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  loading: boolean;
+  error?: string | null;
+  onRefresh: () => void;
+  version?: string;
 }) {
-  const [result, setResult] = useState<ModelCatalogResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
   const [provider, setProvider] = useState("all");
   const [type, setType] = useState("all");
   const [page, setPage] = useState(1);
 
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await fetchModelCatalog(config);
-      setResult(data);
-    } catch (err) {
-      setError((err as Error)?.message || "Não foi possível carregar o catálogo de modelos.");
-    } finally {
-      setLoading(false);
+  const providers = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of models) map.set(m.provider, m.providerName);
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [models]);
+
+  const types = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of models) {
+      map.set(m.type, typeLabel(m.type));
     }
-  };
-
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const providers = useMemo(() => uniqueProviders(result?.providers ?? []), [result]);
-  const types = useMemo(() => uniqueTypes(result?.models ?? []), [result]);
+    const order = ["chat", "audio", "image", "embedding", "rerank", "moderation", "video", "music"];
+    return order
+      .filter((t) => map.has(t))
+      .map((t) => [t, map.get(t)!] as const);
+  }, [models]);
 
   const filtered = useMemo(() => {
-    const models = result?.models ?? [];
-    const q = query.trim().toLowerCase();
     return models.filter((m) => {
       if (provider !== "all" && m.provider !== provider) return false;
       if (type !== "all" && m.type !== type) return false;
-      if (!q) return true;
-      const caps = capabilityLabels(m).join(" ").toLowerCase();
-      return (
-        m.id.toLowerCase().includes(q) ||
-        m.name.toLowerCase().includes(q) ||
-        m.provider.toLowerCase().includes(q) ||
-        caps.includes(q)
-      );
+      if (!matchesSearch(m, search)) return false;
+      return true;
     });
-  }, [result, query, provider, type]);
+  }, [models, provider, type, search]);
 
-  useEffect(() => setPage(1), [query, provider, type]);
+  // reset pagina quando os filtros mudam
+  useEffect(() => {
+    setPage(1);
+  }, [provider, type, search]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const startIndex = (safePage - 1) * PAGE_SIZE;
-  const rows = filtered.slice(startIndex, startIndex + PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rangeStart = filtered.length ? (safePage - 1) * PAGE_SIZE + 1 : 0;
+  const rangeEnd = Math.min(filtered.length, safePage * PAGE_SIZE);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-
-      <div className="reveal relative flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-ink-900 shadow-2xl">
-        {/* cabeçalho */}
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            <h3 className="flex items-center gap-2 font-display text-[16px] font-semibold text-slate-50">
-              <Sparkles className="h-4 w-4 text-violet-300" />
-              Catálogo de modelos
-            </h3>
-            <p className="truncate text-[11.5px] text-slate-500">
-              Metadados de todos os provedores conectados ao seu OminRoute — GET /api/models/catalog
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void load()}
-              disabled={loading}
-              title="Atualizar"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              title="Fechar"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/10 hover:text-white"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* filtros */}
-        <div className="flex flex-col gap-2 border-b border-white/10 bg-black/20 px-4 py-3 sm:flex-row sm:items-center sm:px-5">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+    <div className="rounded-xl border border-white/10 bg-black/25">
+      {/* toolbar */}
+      <div className="flex flex-col gap-2 border-b border-white/10 p-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[180px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
             <input
-              className={cn(inputClass, "pl-9")}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Pesquisar por modelo, provedor ou capacidade…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Pesquisar modelo, provedor ou capacidade"
+              className={cn(
+                "w-full rounded-lg border border-white/10 bg-ink-900/60 py-1.5 pl-8 pr-2 text-xs text-slate-100",
+                "outline-none transition focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/20",
+              )}
             />
           </div>
           <select
-            className={cn(inputClass, "sm:w-48")}
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
+            className="rounded-lg border border-white/10 bg-ink-900/60 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-400/60"
             aria-label="Filtrar por provedor"
           >
             <option value="all">Todos os provedores</option>
-            {providers.map((p) => (
-              <option key={p} value={p}>
-                {p}
+            {providers.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
               </option>
             ))}
           </select>
           <select
-            className={cn(inputClass, "sm:w-40")}
             value={type}
             onChange={(e) => setType(e.target.value)}
+            className="rounded-lg border border-white/10 bg-ink-900/60 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-400/60"
             aria-label="Filtrar por tipo"
           >
             <option value="all">Todos os tipos</option>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {typeLabel(t)}
+            {types.map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
               </option>
             ))}
           </select>
-        </div>
-
-        {/* corpo */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {loading && !result ? (
-            <div className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" /> Carregando catálogo…
-            </div>
-          ) : error && !result ? (
-            <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
-              <AlertCircle className="h-6 w-6 text-rose-400" />
-              <p className="max-w-sm text-sm text-rose-300">{error}</p>
-              <p className="max-w-sm text-xs text-slate-500">
-                Confira o token de gerenciamento e a rota REST em Conexão → REST de gerenciamento.
-              </p>
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="px-4 py-16 text-center text-sm text-slate-500">
-              Nenhum modelo encontrado para esse filtro.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-left text-[12px]">
-                <thead className="sticky top-0 z-10 bg-ink-900/95 backdrop-blur">
-                  <tr className="border-b border-white/10 text-slate-400">
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Provedor</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Modelo</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Tipo</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Capacidades</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Contexto</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Saída</th>
-                    <th className="px-4 py-2.5 font-semibold uppercase tracking-wide">Flags</th>
-                    <th className="px-4 py-2.5" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {rows.map((model: CatalogModel) => {
-                    const caps = capabilityLabels(model);
-                    const extra = caps.slice(3);
-                    const isSelected = config.model === model.id;
-                    return (
-                      <tr key={`${model.providerId}:${model.id}`} className="align-top transition hover:bg-white/[0.03]">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-200">{model.provider}</p>
-                          <p className="mt-0.5 font-mono text-[10px] text-slate-600">{model.providerId}</p>
-                        </td>
-                        <td className="max-w-[220px] px-4 py-3">
-                          <p className="break-words font-medium text-slate-200">{model.name}</p>
-                          <p className="mt-0.5 break-all font-mono text-[10px] text-slate-500">{model.id}</p>
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {typeLabel(model.type)}
-                          {model.subtype && (
-                            <span className="mt-0.5 block text-[10px] text-slate-500">
-                              {typeLabel(model.subtype)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="max-w-[220px] px-4 py-3">
-                          {caps.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {caps.slice(0, 3).map((c) => (
-                                <span
-                                  key={c}
-                                  className="rounded border border-violet-400/20 bg-violet-500/[0.08] px-1.5 py-0.5 text-[10px] text-violet-200"
-                                >
-                                  {c}
-                                </span>
-                              ))}
-                              {extra.length > 0 && (
-                                <span
-                                  title={extra.join(", ")}
-                                  className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-slate-400"
-                                >
-                                  +{extra.length}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-600">—</span>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-slate-300">
-                          {formatCount(model.contextLength)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-slate-300">
-                          {formatCount(model.maxOutputTokens)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {model.custom && (
-                              <span className="rounded border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">
-                                custom
-                              </span>
-                            )}
-                            {model.free && (
-                              <span className="rounded border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
-                                free
-                              </span>
-                            )}
-                            {!model.custom && !model.free && <span className="text-slate-600">—</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => onSelectModel(model.id)}
-                            className={cn(
-                              "flex items-center gap-1 whitespace-nowrap rounded-lg border px-2 py-1 text-[11px] font-medium transition",
-                              isSelected
-                                ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
-                                : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-violet-400/40 hover:bg-violet-500/10 hover:text-violet-200",
-                            )}
-                          >
-                            {isSelected ? <CheckCircle2 className="h-3 w-3" /> : null}
-                            {isSelected ? "Selecionado" : "Usar"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* rodapé / paginação */}
-        <div className="flex flex-col gap-2 border-t border-white/10 px-4 py-3 text-[11.5px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <p>
-            Mostrando {filtered.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, filtered.length)}{" "}
-            de {filtered.length} modelo(s)
-            {result?.catalogVersion ? (
-              <span className="ml-2 font-mono text-[10px] text-slate-600">v{result.catalogVersion}</span>
-            ) : null}
-          </p>
-          <div className="flex items-center gap-2">
-            <span>
-              Página {safePage} de {pageCount}
-            </span>
-            <button
-              type="button"
-              disabled={safePage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/10 disabled:opacity-30"
-              aria-label="Página anterior"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              disabled={safePage >= pageCount}
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/10 disabled:opacity-30"
-              aria-label="Próxima página"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-300 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            Atualizar
+          </button>
         </div>
       </div>
+
+      {/* body */}
+      {loading && models.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 px-4 py-10 text-xs text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando catálogo…
+        </div>
+      ) : error && models.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+          <AlertTriangle className="h-5 w-5 text-amber-400" />
+          <p className="max-w-md text-xs leading-relaxed text-slate-400">{error}</p>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="mt-1 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="px-4 py-10 text-center text-xs text-slate-500">
+          Nenhum modelo corresponde aos filtros.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+            <thead>
+              <tr className="text-[10.5px] uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-2 font-semibold">Provedor</th>
+                <th className="px-3 py-2 font-semibold">Modelo</th>
+                <th className="px-3 py-2 font-semibold">Tipo</th>
+                <th className="px-3 py-2 font-semibold">Capacidades</th>
+                <th className="px-3 py-2 font-semibold">Contexto</th>
+                <th className="px-3 py-2 font-semibold">Saída</th>
+                <th className="px-3 py-2 font-semibold">Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageItems.map((m) => {
+                const selected = selectedId === m.id;
+                return (
+                  <tr
+                    key={m.id}
+                    onClick={() => onSelect(m.id)}
+                    className={cn(
+                      "cursor-pointer border-t border-white/5 transition hover:bg-violet-500/[0.06]",
+                      selected && "bg-violet-500/[0.10]",
+                    )}
+                  >
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        {selected && <Check className="h-3.5 w-3.5 shrink-0 text-violet-300" />}
+                        <span className={cn("max-w-[110px] truncate", selected ? "text-violet-200" : "text-slate-300")}>
+                          {m.providerName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <p className="max-w-[220px] truncate font-mono text-[11px] text-slate-200" title={m.id}>
+                        {m.id}
+                      </p>
+                      {m.name && (
+                        <p className="max-w-[220px] truncate text-[10px] text-slate-500">{m.name}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={cn(
+                          "inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px]",
+                          typeTone(m.type),
+                        )}
+                      >
+                        {typeLabel(m.type, m.subtype)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex max-w-[180px] flex-wrap gap-1">
+                        {capabilityList(m).map((cap) => (
+                          <span
+                            key={cap}
+                            className="whitespace-nowrap rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 text-[9.5px] text-slate-400"
+                          >
+                            {cap}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-400">
+                      {formatTokens(m.contextLength)}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-400">
+                      {formatTokens(m.maxOutputTokens)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap gap-1">
+                        {m.free && (
+                          <span className="rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9.5px] text-emerald-300">
+                            Gratuito
+                          </span>
+                        )}
+                        {m.custom && (
+                          <span className="rounded border border-violet-400/30 bg-violet-500/10 px-1.5 py-0.5 text-[9.5px] text-violet-300">
+                            Custom
+                          </span>
+                        )}
+                        {!m.free && !m.custom && <span className="text-slate-600">—</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* footer: paginação */}
+      <div className="flex items-center justify-between border-t border-white/10 px-3 py-2 text-[11px] text-slate-500">
+        <span>
+          Mostrando {rangeStart}–{rangeEnd} de {filtered.length} modelos
+        </span>
+        <div className="flex items-center gap-2">
+          <span>
+            Página {safePage} de {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={safePage <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-slate-300 transition hover:bg-white/10 disabled:opacity-40"
+          >
+            <ChevronLeft className="h-3 w-3" /> Anterior
+          </button>
+          <button
+            type="button"
+            disabled={safePage >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-slate-300 transition hover:bg-white/10 disabled:opacity-40"
+          >
+            Próximo <ChevronRight className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+
+      {version && (
+        <p className="border-t border-white/5 px-3 py-1.5 text-[10px] text-slate-600">
+          <Sparkles className="mr-1 inline h-3 w-3" />
+          Catálogo v{version} · clique em uma linha para selecionar o modelo
+        </p>
+      )}
     </div>
   );
 }
