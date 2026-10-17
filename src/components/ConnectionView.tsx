@@ -8,6 +8,7 @@ import {
   EyeOff,
   Image as ImageIcon,
   KeyRound,
+  LayoutGrid,
   Loader2,
   Lock,
   Plug,
@@ -26,6 +27,7 @@ import {
   type ServerProfile,
 } from "../lib/serverProfiles";
 import { Field, Card, inputClass } from "./Field";
+import { ModelCatalog } from "./ModelCatalog";
 import { cn } from "../utils/cn";
 import type { ReactNode } from "react";
 
@@ -74,6 +76,7 @@ export function ConnectionView({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showManagementKey, setShowManagementKey] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
 
   const set = <K extends keyof ConnectionConfig>(key: K, value: ConnectionConfig[K]) =>
     onConfigChange({ ...config, [key]: value });
@@ -430,9 +433,36 @@ export function ConnectionView({
         <Card
           title="Modelo"
           icon={<Cpu className="h-4 w-4" />}
-          description="Lista carregada do servidor ou digitado à mão."
+          description="Lista carregada do servidor, catálogo completo ou digitado à mão."
           className="reveal rise-4"
         >
+          <button
+            type="button"
+            onClick={() => setShowCatalog(true)}
+            disabled={!config.managementKey.trim()}
+            title={
+              config.managementKey.trim()
+                ? "Ver todos os modelos, filtrados por provedor e tipo"
+                : "Informe o token de gerenciamento para abrir o catálogo"
+            }
+            className="flex w-full items-center justify-between gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.07] px-3.5 py-3 text-left transition hover:border-violet-400/45 hover:bg-violet-500/[0.12] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-violet-500/[0.07]"
+          >
+            <span className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-400/30 bg-violet-500/10 text-violet-200">
+                <LayoutGrid className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-semibold text-slate-100">
+                  Abrir catálogo de modelos
+                </span>
+                <span className="block text-[11px] text-slate-400">
+                  Filtre por provedor e tipo (chat, imagem, áudio, embedding…) com capacidades e contexto
+                </span>
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-violet-300" />
+          </button>
+
           {models.length > 0 && (
             <Field label="Modelos disponíveis" hint={`${models.length} encontrado(s)`}>
               <select
@@ -667,6 +697,17 @@ export function ConnectionView({
         </Card>
       </div>
       {footer}
+
+      {showCatalog && (
+        <ModelCatalog
+          config={config}
+          onClose={() => setShowCatalog(false)}
+          onSelectModel={(modelId) => {
+            set("model", modelId);
+            setShowCatalog(false);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -116,3 +116,35 @@ export interface MemorySettings {
   fallbackBackends?: string[];
   backendConfigs?: Record<string, Record<string, unknown>>;
 }
+
+/** Tipos de modelo expostos pelo catálogo (GET /api/models/catalog) do OmniRoute. */
+export type CatalogModelType = "chat" | "image" | "embedding" | "audio" | "video" | "music" | "rerank" | string;
+
+export interface CatalogModel {
+  id: string;
+  providerId: string;
+  provider: string;
+  name: string;
+  type: CatalogModelType;
+  subtype?: string;
+  custom?: boolean;
+  free?: boolean;
+  capabilities?: Record<string, boolean | string[]>;
+  contextLength?: number;
+  maxOutputTokens?: number;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  supportedEndpoints?: string[];
+}
+
+export interface CatalogProviderBucket {
+  provider: string;
+  active: boolean;
+  models: CatalogModel[];
+}
+
+export interface ModelCatalogResult {
+  providers: CatalogProviderBucket[];
+  models: CatalogModel[];
+  catalogVersion?: string | null;
+}
