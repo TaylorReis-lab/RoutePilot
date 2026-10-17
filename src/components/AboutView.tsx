@@ -1,6 +1,10 @@
+import type { ReactNode } from "react";
 import {
   BookOpen,
+  Brain,
   Boxes,
+  ChevronRight,
+  Database,
   ExternalLink,
   Globe,
   Heart,
@@ -14,7 +18,15 @@ import {
   Zap,
 } from "lucide-react";
 import { Card } from "./Field";
+import { Markdown } from "./Markdown";
+import { FILE_GROUPS, MAX_FILES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, formatBytes } from "../lib/fileTypes";
+import {
+  MEMORY_SUPPORT_LABEL,
+  SERVER_PROFILES,
+  VISION_SUPPORT_LABEL,
+} from "../lib/serverProfiles";
 import { GithubIcon, LinkedinIcon } from "./SocialIcons";
+import { cn } from "../utils/cn";
 
 const steps = [
   {
@@ -33,9 +45,19 @@ const steps = [
     text: "Cada mensagem vai para POST /chat/completions no formato OpenAI. A resposta chega token por token (SSE), com markdown e blocos de código com cópia rápida.",
   },
   {
+    icon: <Boxes className="h-4 w-4" />,
+    title: "4. Anexe arquivos",
+    text: "O clipe do Composer aceita até 5 arquivos. Código, dados, logs e texto entram no corpo da mensagem como bloco cercado (você revisa antes de enviar); PNG/JPG/WebP viram blocos image_url e só saem se o modelo for de visão.",
+  },
+  {
     icon: <KeyRound className="h-4 w-4" />,
-    title: "4. Chave criptografada no seu navegador",
-    text: "Sua API Key é criptografada localmente via AES-GCM (Web Crypto API) antes de ir para o localStorage. Nada de texto puro gravado.",
+    title: "5. Chaves protegidas no seu navegador",
+    text: "A API Key de inferência e o token de gerenciamento são cifrados localmente com AES-GCM de 256 bits (Web Crypto API + PBKDF2, salt e IV aleatórios) antes de irem para o localStorage.",
+  },
+  {
+    icon: <Brain className="h-4 w-4" />,
+    title: "6. Memória onde ela existe",
+    text: "Somente o OminRoute tem API de memória persistente (FTS5 + embeddings + Qdrant, com extração automática de fatos). Em Ollama, LM Studio, llama.cpp, vLLM e OpenRouter não há memória no servidor — o RoutePilot detecta, avisa e usa o histórico local mais o system prompt.",
   },
 ];
 
@@ -73,19 +95,35 @@ const contributors = [
 const faq = [
   {
     q: "A API Key fica segura?",
-    a: "Sim. Ela é criptografada no próprio navegador usando a Web Crypto API (AES-GCM 256 bits com PBKDF2 e IV único). O texto puro nunca é salvo no localStorage.",
+    a: "A chave de inferência e o token de gerenciamento são criptografados no próprio navegador usando a Web Crypto API (AES-GCM 256 bits com PBKDF2 e IV único) antes de serem salvos no localStorage.",
   },
   {
     q: "Deu erro de CORS. E agora?",
-    a: "Se o seu servidor local não envia headers de CORS, rode `node proxy.mjs` incluído no projeto e ative “Usar proxy local (CORS)” nas configurações avançadas apontando para http://localhost:8787.",
+    a: "Se o seu servidor local não envia headers de CORS, rode `node proxy.mjs` (incluído no projeto) e ative “Usar proxy local (CORS)” em Conexão → Avançado apontando para http://localhost:8787. O proxy já libera os headers usados aqui, inclusive Authorization, HTTP-Referer, X-Title e X-Session-Id.",
   },
   {
     q: "Quais servidores funcionam?",
     a: "Qualquer API compatível com OpenAI: Ollama, LM Studio, llama.cpp, vLLM, LocalAI, text-generation-webui, OpenRouter e o seu próprio OminRoute.",
   },
   {
-    q: "Como publicar no Netlify?",
-    a: "O projeto já tem netlify.toml configurado na raiz. Conecte o repositório no Netlify e o deploy é automático em menos de 1 minuto.",
+    q: "Como funciona o aprendizado automático?",
+    a: "Ao ativar Memória na aba Aprendizado, o OmniRoute pode recuperar fatos em conversas futuras e extrair preferências/decisões. O próprio servidor controla essa função; ela pode acrescentar tokens ao contexto. Para guardar algo pontual, use o botão Aprender em uma resposta ou crie uma memória manual.",
+  },
+  {
+    q: "Por que a memória pede outro token?",
+    a: "A REST de memória passa por requireManagementAuth: use um Access Token do OminRoute (oma_live_…) com escopo read/write/admin, ou uma API Key habilitada com manage/admin. Uma chave comum de inferência recebe 401/403 nessas rotas.",
+  },
+  {
+    q: "Quais servidores têm memória como a do OminRoute?",
+    a: "Nenhum outro. Ollama, LM Studio, llama.cpp, vLLM e OpenRouter são stateless: você reenvia o histórico a cada chamada e nada é guardado no servidor. O LocalAI oferece \"stores\" de vetores (get/set/find), que dá para usar como memória feita à mão, sem injeção automática. O RoutePilot detecta isso e, nesses casos, mantém apenas o histórico local do navegador mais o system prompt.",
+  },
+  {
+    q: "Posso mandar PDF, Word ou planilha?",
+    a: "Não como binário. Exporte: PDF/Word → .txt ou .md, planilha → .csv, dados → .json/.jsonl. O texto entra no corpo da mensagem dentro de um bloco cercado, e você pode revisar ou apagar trechos antes de enviar.",
+  },
+  {
+    q: "Anexei uma imagem e o modelo não viu. Por quê?",
+    a: "Confirme três coisas: o modelo é de visão (llava, llama3.2-vision, qwen2.5-vl, gemma3, gpt-4o…); no llama.cpp o servidor foi iniciado com --mmproj; e em Conexão → Parâmetros o envio de imagens não está em \"nunca enviar\". O RoutePilot usa o formato OpenAI image_url com data URI, aceito por OminRoute, Ollama (/v1), LM Studio, llama.cpp, vLLM e OpenRouter.",
   },
 ];
 
@@ -95,9 +133,12 @@ const shortcuts = [
   { keys: ["■"], desc: "Parar a geração (durante o streaming)" },
 ];
 
-export function AboutView() {
+export function AboutView({ footer }: { footer?: ReactNode }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+    <div
+      id="routepilot-scroll"
+      className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+    >
       <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
         <header>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-[11px] font-medium text-violet-200">
@@ -205,27 +246,198 @@ export function AboutView() {
 
         {/* Segurança da Chave */}
         <Card
-          title="Segurança da API Key"
+          title="Segurança das chaves"
           icon={<Lock className="h-4 w-4" />}
-          description="Sua credencial protegida com criptografia nativa do navegador."
+          description="Duas credenciais, cada uma no seu escopo — ambas cifradas no navegador."
         >
           <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-emerald-200">
             <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
             <div className="text-xs leading-relaxed">
               <p className="font-semibold text-emerald-100">Criptografia AES-GCM ativada</p>
               <p className="mt-0.5 text-emerald-200/80">
-                Ao preencher sua chave na aba Conexão, ela é criptografada com algoritmo AES-GCM 256
-                bits (Web Crypto API) antes de ser gravada no localStorage. Ela só é descriptografada
-                na memória para autenticar com o seu servidor no momento da requisição.
+                A <strong className="text-emerald-100">API Key</strong> fala com <code>/v1</code> e o{" "}
+                <strong className="text-emerald-100">token de gerenciamento</strong> fala com{" "}
+                <code>/api</code>. Cada um é criptografado com AES-GCM de 256 bits (Web Crypto API,
+                PBKDF2 com 100.000 iterações, salt e IV aleatórios por gravação) antes de ir para o
+                localStorage, e só é decifrado em memória no instante da requisição. Separar as duas
+                evita que uma chave de chat consiga mexer na sua memória.
               </p>
             </div>
           </div>
         </Card>
 
         <Card
+          title="Arquivos que você pode mandar para a IA"
+          icon={<Boxes className="h-4 w-4" />}
+          description={`Até ${MAX_FILES} arquivos por mensagem: texto entra no corpo da mensagem, imagem vira bloco de visão.`}
+        >
+          <div className="space-y-2.5">
+            {FILE_GROUPS.map((group) => (
+              <div key={group.kind} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[12.5px] font-semibold text-slate-100">{group.label}</p>
+                  <span className="rounded-full border border-violet-400/20 bg-violet-500/[0.08] px-2 py-0.5 text-[10px] text-violet-200">
+                    {group.note}
+                  </span>
+                  <span className="ml-auto font-mono text-[10px] text-slate-600">
+                    {group.exts.length} extensões
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {group.exts.map((ext) => (
+                    <span
+                      key={ext}
+                      className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-slate-300"
+                    >
+                      .{ext}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[
+              { k: "Texto no corpo", v: `até ${formatBytes(MAX_TEXT_BYTES)} por arquivo`, d: "colado dentro da mensagem; você revisa antes de enviar" },
+              { k: "Imagens", v: `até ${formatBytes(MAX_IMAGE_BYTES)} por arquivo`, d: "enviadas como image_url (data URI) para modelos de visão" },
+              { k: "Não lidos", v: "PDF, DOCX, XLSX, ZIP", d: "binários: exporte para .txt, .md ou .csv antes de anexar" },
+            ].map((item) => (
+              <div key={item.k} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{item.k}</p>
+                <p className="mt-1 text-[13px] font-semibold text-slate-100">{item.v}</p>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">{item.d}</p>
+              </div>
+            ))}
+          </div>
+
+          <Markdown
+            content={`No servidor, o corpo da mensagem fica assim:
+
+\`\`\`json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "Analise o arquivo e a captura de tela abaixo" },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo..." } }
+  ]
+}
+\`\`\`
+
+Arquivos de texto são embutidos como bloco cercado, então o modelo cita linhas exatas:
+
+\`\`\`markdown
+Arquivo: src/lib/api.ts
+\`\`\`ts
+export function buildBaseUrl(config: ConnectionConfig) { ... }
+\`\`\`
+\`\`\``}
+          />
+        </Card>
+
+        <Card
+          title="Memória e visão em cada servidor"
+          icon={<Wifi className="h-4 w-4" />}
+          description="Nem todo servidor OpenAI-compatível tem API de memória. Veja o que o RoutePilot faz em cada caso."
+        >
+          <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
+            <table className="w-full min-w-[620px] border-collapse text-left text-[12px]">
+              <thead>
+                <tr className="bg-white/[0.03] text-slate-400">
+                  <th className="px-3 py-2 font-semibold">Servidor</th>
+                  <th className="px-3 py-2 font-semibold">Chat</th>
+                  <th className="px-3 py-2 font-semibold">REST / gestão</th>
+                  <th className="px-3 py-2 font-semibold">Memória</th>
+                  <th className="px-3 py-2 font-semibold">Imagens</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {SERVER_PROFILES.map((p) => (
+                  <tr key={p.id} className="align-top hover:bg-white/[0.02]">
+                    <td className="px-3 py-2.5">
+                      <p className="font-semibold text-slate-100">{p.name}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{p.tagline}</p>
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[10.5px] text-slate-400">
+                      {p.host.replace(/^https?:\/\//, "")}
+                      {p.port ? `:${p.port}` : ""}
+                      {p.basePath || "/"}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[10.5px] text-cyan-200/90">
+                      {p.restPath ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-[10px] uppercase",
+                          p.memory === "full"
+                            ? "border-emerald-400/30 text-emerald-300"
+                            : p.memory === "partial"
+                              ? "border-ember-400/30 text-ember-300"
+                              : "border-white/10 text-slate-400",
+                        )}
+                      >
+                        {MEMORY_SUPPORT_LABEL[p.memory]}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] text-slate-400">
+                      {VISION_SUPPORT_LABEL[p.vision]}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="space-y-3">
+            {SERVER_PROFILES.map((p) => (
+              <details
+                key={p.id}
+                className="group/delta rounded-xl border border-white/[0.07] bg-black/20 open:bg-white/[0.02]"
+              >
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-2.5 text-[13px] font-semibold text-slate-200 transition hover:text-white">
+                  <ChevronRight className="h-4 w-4 shrink-0 text-violet-300 transition group-open/delta:rotate-90" />
+                  {p.name}
+                  <span className="ml-auto font-mono text-[10px] font-normal text-slate-500">
+                    {p.restPath ? `${p.restPath}/memory` : "sem API de memória"}
+                  </span>
+                </summary>
+                <div className="space-y-3 border-t border-white/[0.06] px-3.5 py-3">
+                  <p className="text-[12.5px] leading-relaxed text-slate-400">{p.memoryNote}</p>
+                  <p className="text-[12.5px] leading-relaxed text-slate-400">{p.visionNote}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {p.endpoints.map((ep) => (
+                      <span
+                        key={ep}
+                        className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-slate-300"
+                      >
+                        {ep}
+                      </span>
+                    ))}
+                  </div>
+                  <Markdown content={`\`\`\`bash
+${p.chatExample}
+\`\`\``} />
+                  {p.memoryExample ? (
+                    <>
+                      <p className="text-[11.5px] text-slate-500">
+                        Escrita na memória persistente (exemplo real usado pelo RoutePilot):
+                      </p>
+                      <Markdown content={`\`\`\`bash
+${p.memoryExample}
+\`\`\``} />
+                    </>
+                  ) : null}
+                </div>
+              </details>
+            ))}
+          </div>
+        </Card>
+
+        <Card
           title="Como funciona"
           icon={<Wifi className="h-4 w-4" />}
-          description="Do clique até o token na tela, em quatro passos."
+          description="Do clique até o token na tela — anexos, chaves e memória incluídos."
         >
           <ol className="space-y-4">
             {steps.map((step) => (
@@ -243,11 +455,42 @@ export function AboutView() {
         </Card>
 
         <Card
+          title="Memória, aprendizado e próximos passos"
+          icon={<Brain className="h-4 w-4" />}
+          description="O RoutePilot administra a memória pelo REST API do OmniRoute."
+        >
+          <div className="space-y-3 text-[13px] leading-relaxed text-slate-400">
+            <p>
+              A aba <strong className="text-slate-200">Memória</strong> permite consultar, buscar,
+              criar, editar e excluir memórias persistentes. O botão <strong className="text-slate-200">Aprender</strong>
+              em uma resposta grava a pergunta e a resposta como um episódio; na aba Aprendizado
+              você também pode ativar a extração e a recuperação automáticas do OmniRoute.
+            </p>
+            <p>
+              O motor e o armazenamento atuais são controlados pelo próprio OmniRoute (SQLite/FTS5,
+              com embeddings e Qdrant opcionais conforme a configuração do servidor). A rota REST
+              normalmente é <code className="text-cyan-300">/api</code> na porta{" "}
+              <code className="text-cyan-300">20128</code>; configure essa rota e um token de
+              gerenciamento na aba Conexão. A chave de inferência do chat não substitui esse token.
+            </p>
+          </div>
+          <div className="flex items-start gap-3 rounded-xl border border-violet-400/20 bg-violet-500/[0.07] p-3">
+            <Database className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" />
+            <p className="text-xs leading-relaxed text-violet-100/80">
+              <strong className="text-violet-100">Roadmap:</strong> uma conexão direta e opcional
+              com outros sistemas SQL pode ser adicionada em uma versão futura. Ela ainda não está
+              implementada: por enquanto, o RoutePilot usa somente a API de memória do OmniRoute e
+              não abre conexão direta com bancos de dados.
+            </p>
+          </div>
+        </Card>
+
+        <Card
           title="Anatomia da requisição HTTP"
           icon={<Terminal className="h-4 w-4" />}
           description="Payload compatível com o ecossistema OpenAI / OpenRouter."
         >
-          <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0b1020]">
+          <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-850">
             <div className="flex items-center justify-between border-b border-white/10 px-3 py-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
                 HTTP Request
@@ -296,11 +539,12 @@ Content-Type: application/json
           <div className="grid gap-2 pt-2 text-[13px] text-slate-400 sm:grid-cols-2">
             {[
               "Streaming SSE em tempo real",
+              "Anexos de código, dados e imagens",
               "Chave com criptografia AES-GCM",
+              "Memória e aprendizado do OmniRoute",
               "Markdown completo e tabelas",
               "Regeneração de respostas",
               "Histórico de conversas local",
-              "Pronto para deploy no Netlify",
             ].map((item) => (
               <div key={item} className="flex items-start gap-2">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
@@ -350,6 +594,7 @@ Content-Type: application/json
           </div>
         </footer>
       </div>
+      {footer}
     </div>
   );
 }

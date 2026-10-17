@@ -15,6 +15,10 @@ export const defaultConfig: ConnectionConfig = {
   port: "20128",
   basePath: "/v1",
   apiKey: "",
+  managementKey: "",
+  managementPort: "",
+  managementPath: "/api",
+  memoryApiKeyId: "",
   model: "",
   temperature: 0.7,
   maxTokens: 2048,
@@ -25,6 +29,7 @@ export const defaultConfig: ConnectionConfig = {
   appTitle: "RoutePilot",
   useProxy: false,
   proxyUrl: "http://localhost:8787",
+  visionMode: "auto",
 };
 
 function readRaw(keys: string[]): string | null {
@@ -53,6 +58,9 @@ export async function loadConfigAsync(): Promise<ConnectionConfig> {
     if (cfg.apiKey) {
       cfg.apiKey = await decryptApiKey(cfg.apiKey);
     }
+    if (cfg.managementKey) {
+      cfg.managementKey = await decryptApiKey(cfg.managementKey);
+    }
     return cfg;
   } catch {
     return { ...defaultConfig };
@@ -77,11 +85,17 @@ export function loadConfigSync(): ConnectionConfig {
  * Salva a configuração no localStorage, CRIPTOGRAFANDO a API Key antes de persistir.
  */
 export async function saveConfigSecure(config: ConnectionConfig): Promise<void> {
+  const revision = ++saveRevision;
   try {
     const toSave: ConnectionConfig = { ...config };
     if (toSave.apiKey) {
       toSave.apiKey = await encryptApiKey(toSave.apiKey);
     }
+    if (toSave.managementKey) {
+      toSave.managementKey = await encryptApiKey(toSave.managementKey);
+    }
+    // Prevent slower encryption jobs from overwriting a newer edit.
+    if (revision !== saveRevision) return;
     localStorage.setItem(CONFIG_KEY, JSON.stringify(toSave));
     // remove chaves legadas do nome antigo para não duplicar dados
     for (const key of LEGACY_KEYS) {
@@ -97,6 +111,8 @@ export async function saveConfigSecure(config: ConnectionConfig): Promise<void> 
     /* ignore quota errors */
   }
 }
+
+let saveRevision = 0;
 
 export function loadSessions(): Session[] {
   try {

@@ -1,4 +1,5 @@
 import type { ChatMessage, ConnectionConfig, Usage } from "../types";
+import { detectProfile } from "./serverProfiles";
 
 export class ApiError extends Error {
   status?: number;
@@ -38,6 +39,48 @@ export function buildEndpoint(config: ConnectionConfig, endpoint: string): strin
   return full;
 }
 
+/** Builds the OmniRoute management API root, normally http://localhost:20128/api. */
+export function buildManagementBaseUrl(config: ConnectionConfig): string {
+  const rawHost = (config.host || "http://localhost").trim();
+  const url = new URL(rawHost);
+  const overridePort = (config.managementPort || "").trim();
+  const configuredPort = (config.port || "").trim();
+  if (overridePort) url.port = overridePort;
+  else if (!url.port && configuredPort) url.port = configuredPort;
+
+  const route = `/${(config.managementPath || "/api").trim().replace(/^\/+|\/+$/g, "")}`;
+  const existingPath = url.pathname.replace(/\/+$/, "");
+  url.pathname = existingPath.toLowerCase().endsWith(route.toLowerCase())
+    ? existingPath
+    : `${existingPath}${route}`;
+  url.search = "";
+  url.hash = "";
+  return stripTrailingSlash(url.toString());
+}
+
+/** URL for a management API route; the inference and management ports may differ. */
+export function buildManagementEndpoint(config: ConnectionConfig, endpoint: string): string {
+  const base = buildManagementBaseUrl(config);
+  const full = `${base}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  if (config.useProxy && config.proxyUrl.trim()) {
+    const proxy = stripTrailingSlash(config.proxyUrl.trim());
+    return `${proxy}/proxy?url=${encodeURIComponent(full)}`;
+  }
+  return full;
+}
+
+/** Management credentials are intentionally separate from the inference API key. */
+export function buildManagementHeaders(config: ConnectionConfig): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (config.managementKey.trim()) {
+    headers.Authorization = `Bearer ${config.managementKey.trim()}`;
+  }
+  return headers;
+}
+
 function parseExtraHeaders(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
   raw
@@ -54,12 +97,13 @@ function parseExtraHeaders(raw: string): Record<string, string> {
   return out;
 }
 
-export function buildHeaders(config: ConnectionConfig): Record<string, string> {
+export function buildHeaders(config: ConnectionConfig, sessionId?: string): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
   };
   if (config.apiKey.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+  if (sessionId?.trim()) headers["X-Session-Id"] = sessionId.trim();
   if (config.referer.trim()) headers["HTTP-Referer"] = config.referer.trim();
   if (config.appTitle.trim()) headers["X-Title"] = config.appTitle.trim();
   return { ...headers, ...parseExtraHeaders(config.extraHeaders) };
@@ -137,6 +181,26 @@ export interface StreamResult {
   model?: string;
 }
 
+/** "openai" manda imagens como blocos image_url; "off" nunca as envia. */
+export function resolveVisionMode(config: ConnectionConfig): "openai" | "off" {
+  if (config.visionMode === "off") return "off";
+  const profile = detectProfile(config);
+  if (config.visionMode === "openai") return "openai";
+  return profile.vision === "none" ? "off" : "openai";
+}
+
+function toApiMessage(config: ConnectionConfig, message: ChatMessage) {
+  const images = resolveVisionMode(config) === "openai" ? (message.images ?? []) : [];
+  if (!images.length) return { role: message.role, content: message.content };
+  return {
+    role: message.role,
+    content: [
+      ...(message.content ? [{ type: "text", text: message.content }] : []),
+      ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+    ],
+  };
+}
+
 function buildRequestBody(
   config: ConnectionConfig,
   messages: ChatMessage[],
@@ -144,7 +208,7 @@ function buildRequestBody(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     model: config.model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: messages.map((m) => toApiMessage(config, m)),
     stream,
   };
   if (typeof config.temperature === "number") payload.temperature = config.temperature;
@@ -158,6 +222,7 @@ export async function streamChat(
   messages: ChatMessage[],
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<StreamResult> {
   const url = buildEndpoint(config, "/chat/completions");
   const body = buildRequestBody(config, messages, true);
@@ -166,7 +231,7 @@ export async function streamChat(
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: buildHeaders(config),
+      headers: buildHeaders(config, sessionId),
       body: JSON.stringify(body),
       signal,
     });
@@ -260,6 +325,7 @@ export async function completeChat(
   config: ConnectionConfig,
   messages: ChatMessage[],
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<StreamResult> {
   const url = buildEndpoint(config, "/chat/completions");
   const body = buildRequestBody(config, messages, false);
@@ -267,7 +333,7 @@ export async function completeChat(
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: buildHeaders(config),
+      headers: buildHeaders(config, sessionId),
       body: JSON.stringify(body),
       signal,
     });

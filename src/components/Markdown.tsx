@@ -11,16 +11,18 @@ const components: Partial<Components> = {
     const raw = String(children ?? "").replace(/\n$/, "");
     if (match) {
       return (
-        <div className="my-3 overflow-hidden rounded-xl border border-white/10 bg-[#0b1020]">
-          <div className="flex items-center justify-between border-b border-white/10 px-3 py-1.5">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-              {match[1]}
-            </span>
-            <CopyButton text={raw} />
+        <div className="my-3 overflow-hidden rounded-xl border border-white/10 bg-ink-850">
+          <div className="max-h-[24rem] overflow-y-auto">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-ink-800 px-3 py-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                {match[1]}
+              </span>
+              <CopyButton text={raw} />
+            </div>
+            <pre className="overflow-x-auto px-4 py-3 text-[13px] leading-relaxed">
+              <code className={className}>{raw}</code>
+            </pre>
           </div>
-          <pre className="overflow-x-auto px-4 py-3 text-[13px] leading-relaxed">
-            <code className={className}>{raw}</code>
-          </pre>
         </div>
       );
     }

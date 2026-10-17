@@ -21,7 +21,7 @@ const cors = {
   "Access-Control-Allow-Origin": ALLOW_ORIGIN,
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type,Authorization,Accept,HTTP-Referer,X-Title,X-Custom,OpenAI-Organization",
+    "Content-Type,Authorization,Accept,HTTP-Referer,X-Title,X-Custom,X-Session-Id,OpenAI-Organization",
   "Access-Control-Max-Age": "86400",
 };
 
